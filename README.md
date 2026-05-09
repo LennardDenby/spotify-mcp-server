@@ -294,7 +294,7 @@ A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) se
 
 ### Prerequisites
 
-- Node.js v16+
+- Node.js v18+
 - A Spotify Premium account
 - A registered Spotify Developer application
 
@@ -373,6 +373,59 @@ npm run auth
 
 7. **Automatic Token Refresh**: The server will automatically refresh the access token when it expires (typically after 1 hour). The refresh happens transparently using the `refreshToken`, so you don't need to re-authenticate manually. If the refresh fails, you'll need to run `npm run auth` again to re-authenticate.
 
+### Running The HTTP Server
+
+The server now exposes MCP over Streamable HTTP instead of `stdio`.
+
+By default it listens on `0.0.0.0:6768`, so other devices on your LAN can connect to it using your machine IP address.
+
+You can start it locally with:
+
+```bash
+npm run build
+npm run start
+```
+
+Optional environment variables:
+
+- `MCP_HOST` defaults to `0.0.0.0`
+- `MCP_PORT` defaults to `6768`
+
+Example remote MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "spotify": {
+      "url": "http://192.168.1.67:6768"
+    }
+  }
+}
+```
+
+If your client requires an explicit path, `http://192.168.1.67:6768/mcp` also works.
+
+### Docker
+
+Build and run with Docker Compose:
+
+```bash
+docker compose up --build -d
+```
+
+This publishes the server on `6768` and mounts `spotify-config.json` into the container:
+
+```yaml
+services:
+  spotify-mcp-server:
+    ports:
+      - "6768:6768"
+    volumes:
+      - ./spotify-config.json:/app/spotify-config.json
+```
+
+Important: run `npm run auth` on the host first so your `spotify-config.json` already contains valid Spotify tokens before starting the container.
+
 ## Integrating with Claude Desktop, Cursor, and VsCode [Via Cline model extension](https://marketplace.visualstudio.com/items/?itemName=saoudrizwan.claude-dev)
 
 To use your MCP server with Claude Desktop, add it to your Claude configuration:
@@ -381,17 +434,16 @@ To use your MCP server with Claude Desktop, add it to your Claude configuration:
 {
   "mcpServers": {
     "spotify": {
-      "command": "node",
-      "args": ["spotify-mcp-server/build/index.js"]
+      "url": "http://192.168.1.67:6768"
     }
   }
 }
 ```
 
-For Cursor, go to the MCP tab in `Cursor Settings` (command + shift + J). Add a server with this command:
+For Cursor, go to the MCP tab in `Cursor Settings` and add the server URL:
 
-```bash
-node path/to/spotify-mcp-server/build/index.js
+```text
+http://192.168.1.67:6768
 ```
 
 To set up your MCP correctly with Cline ensure you have the following file configuration set `cline_mcp_settings.json`:
@@ -400,8 +452,7 @@ To set up your MCP correctly with Cline ensure you have the following file confi
 {
   "mcpServers": {
     "spotify": {
-      "command": "node",
-      "args": ["~/../spotify-mcp-server/build/index.js"],
+      "url": "http://192.168.1.67:6768",
       "autoApprove": ["getListeningHistory", "getNowPlaying"]
     }
   }

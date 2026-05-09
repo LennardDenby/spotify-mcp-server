@@ -1,0 +1,12 @@
+services:
+  spotify-mcp-server:
+    build:
+      context: .
+    ports:
+      - "6768:6768"
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 6768
+    volumes:
+      - ./spotify-config.json:/app/spotify-config.json
+    restart: unless-stopped
