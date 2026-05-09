@@ -375,7 +375,7 @@ npm run auth
 
 ### Running The HTTP Server
 
-The server now exposes MCP over Streamable HTTP instead of `stdio`.
+The server now exposes MCP over HTTP using the legacy SSE transport instead of `stdio`.
 
 By default it listens on `0.0.0.0:6768`, so other devices on your LAN can connect to it using your machine IP address.
 
@@ -397,13 +397,18 @@ Example remote MCP configuration:
 {
   "mcpServers": {
     "spotify": {
-      "url": "http://192.168.1.67:6768"
+      "url": "http://192.168.1.67:6768/sse"
     }
   }
 }
 ```
 
-If your client requires an explicit path, `http://192.168.1.67:6768/mcp` also works.
+For browser-based tools such as MCP Inspector, use the SSE endpoint directly: `http://192.168.1.67:6768/sse`.
+
+The server uses these HTTP endpoints:
+
+- `GET /sse` to establish the MCP event stream
+- `POST /messages?sessionId=...` for client messages
 
 ### Docker
 
@@ -434,7 +439,7 @@ To use your MCP server with Claude Desktop, add it to your Claude configuration:
 {
   "mcpServers": {
     "spotify": {
-      "url": "http://192.168.1.67:6768"
+      "url": "http://192.168.1.67:6768/sse"
     }
   }
 }
@@ -443,7 +448,7 @@ To use your MCP server with Claude Desktop, add it to your Claude configuration:
 For Cursor, go to the MCP tab in `Cursor Settings` and add the server URL:
 
 ```text
-http://192.168.1.67:6768
+http://192.168.1.67:6768/sse
 ```
 
 To set up your MCP correctly with Cline ensure you have the following file configuration set `cline_mcp_settings.json`:
@@ -452,7 +457,7 @@ To set up your MCP correctly with Cline ensure you have the following file confi
 {
   "mcpServers": {
     "spotify": {
-      "url": "http://192.168.1.67:6768",
+      "url": "http://192.168.1.67:6768/sse",
       "autoApprove": ["getListeningHistory", "getNowPlaying"]
     }
   }
