@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { albumTools } from './albums.js';
 import { playTools } from './play.js';
 import { playlistTools } from './playlist.js';
@@ -9,7 +8,8 @@ import { readTools } from './read.js';
 
 const host = process.env.MCP_HOST ?? '0.0.0.0';
 const port = Number.parseInt(process.env.MCP_PORT ?? '6768', 10);
-const endpointPaths = new Set(['/', '/mcp']);
+const ssePath = '/sse';
+const messagePath = '/messages';
 
 function createMcpServer() {
   const server = new McpServer({
@@ -26,20 +26,10 @@ function createMcpServer() {
 
 type Session = {
   server: McpServer;
-  transport: StreamableHTTPServerTransport;
+  transport: SSEServerTransport;
 };
 
 const sessions = new Map<string, Session>();
-
-function isInitializeRequest(body: unknown): body is { method: string } {
-  return (
-    typeof body === 'object' &&
-    body !== null &&
-    'method' in body &&
-    typeof (body as { method?: unknown }).method === 'string' &&
-    (body as { method: string }).method === 'initialize'
-  );
-}
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -70,17 +60,16 @@ function writeText(res: ServerResponse, statusCode: number, body: string) {
 
 function setCorsHeaders(res: ServerResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
-}
-
-function getSessionId(req: IncomingMessage) {
-  const header = req.headers['mcp-session-id'];
-  return Array.isArray(header) ? header[0] : header;
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 function getPathname(req: IncomingMessage) {
   return new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).pathname;
+}
+
+function getQuerySessionId(req: IncomingMessage) {
+  return new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).searchParams.get('sessionId');
 }
 
 async function handleMcpRequest(req: IncomingMessage, res: ServerResponse) {
@@ -93,101 +82,56 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     const pathname = getPathname(req);
-    if (!endpointPaths.has(pathname)) {
-      writeText(res, 404, 'Not found');
+
+    if (req.method === 'GET' && pathname === '/') {
+      writeText(res, 200, 'Spotify MCP server is running');
       return;
     }
 
-    if (req.method === 'GET') {
+    if (req.method === 'GET' && pathname === ssePath) {
       setCorsHeaders(res);
-      const sessionId = getSessionId(req);
 
+      const server = createMcpServer();
+      const transport = new SSEServerTransport(messagePath, res);
+      const sessionId = transport.sessionId;
+      sessions.set(sessionId, { server, transport });
+
+      transport.onclose = () => {
+        sessions.delete(sessionId);
+      };
+
+      await server.connect(transport);
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === messagePath) {
+      setCorsHeaders(res);
+
+      const sessionId = getQuerySessionId(req);
       if (!sessionId) {
-        writeText(res, 200, 'Spotify MCP server is running');
+        writeText(res, 400, 'Missing sessionId parameter');
         return;
       }
 
       const session = sessions.get(sessionId);
       if (!session) {
-        writeText(res, 400, 'Invalid or missing session ID');
+        writeText(res, 404, 'Session not found');
         return;
       }
 
-      await session.transport.handleRequest(req, res);
-      return;
-    }
-
-    if (req.method === 'POST') {
-      setCorsHeaders(res);
       const body = await readJsonBody(req);
-
-      const sessionId = getSessionId(req);
-
-      if (sessionId) {
-        const session = sessions.get(sessionId);
-        if (!session) {
-          writeJson(res, 400, {
-            jsonrpc: '2.0',
-            error: {
-              code: -32000,
-              message: 'Bad Request: No valid session ID provided',
-            },
-            id: null,
-          });
-          return;
-        }
-
-        await session.transport.handleRequest(req, res, body);
-        return;
-      }
-
-      if (!isInitializeRequest(body)) {
-        writeJson(res, 400, {
-          jsonrpc: '2.0',
-          error: {
-            code: -32000,
-            message: 'Bad Request: Session required for non-initialize requests',
-          },
-          id: null,
-        });
-        return;
-      }
-
-      const server = createMcpServer();
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (newSessionId) => {
-          sessions.set(newSessionId, { server, transport });
-        },
-      });
-
-      transport.onclose = () => {
-        if (transport.sessionId) {
-          sessions.delete(transport.sessionId);
-        }
-      };
-
-      await server.connect(transport);
-      await transport.handleRequest(req, res, body);
+      await session.transport.handlePostMessage(req, res, body);
       return;
     }
 
-    if (req.method === 'DELETE') {
-      setCorsHeaders(res);
-      const sessionId = getSessionId(req);
-
-      const session = sessionId ? sessions.get(sessionId) : undefined;
-
-      if (!session) {
-        writeText(res, 400, 'Invalid or missing session ID');
-        return;
-      }
-
-      await session.transport.handleRequest(req, res);
+    if (pathname === ssePath || pathname === messagePath || pathname === '/') {
+      writeText(res, 405, 'Method not allowed');
       return;
     }
 
-    writeText(res, 405, 'Method not allowed');
+    writeText(res, 404, 'Not found');
+    return;
+
   } catch (error) {
     if (error instanceof SyntaxError) {
       writeJson(res, 400, {
@@ -226,6 +170,7 @@ async function main() {
 
   httpServer.listen(port, host, () => {
     console.log(`Spotify MCP server listening on http://${host}:${port}`);
+    console.log(`SSE endpoint: http://${host}:${port}${ssePath}`);
   });
 
   const shutdown = async () => {
