@@ -57,13 +57,21 @@ function writeJson(
   statusCode: number,
   payload: Record<string, unknown>,
 ) {
+  setCorsHeaders(res);
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
 }
 
 function writeText(res: ServerResponse, statusCode: number, body: string) {
+  setCorsHeaders(res);
   res.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end(body);
+}
+
+function setCorsHeaders(res: ServerResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
 }
 
 function getSessionId(req: IncomingMessage) {
@@ -77,6 +85,13 @@ function getPathname(req: IncomingMessage) {
 
 async function handleMcpRequest(req: IncomingMessage, res: ServerResponse) {
   try {
+    if (req.method === 'OPTIONS') {
+      setCorsHeaders(res);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     const pathname = getPathname(req);
     if (!endpointPaths.has(pathname)) {
       writeText(res, 404, 'Not found');
@@ -84,7 +99,9 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (req.method === 'GET') {
+      setCorsHeaders(res);
       const sessionId = getSessionId(req);
+
       if (!sessionId) {
         writeText(res, 200, 'Spotify MCP server is running');
         return;
@@ -101,7 +118,9 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (req.method === 'POST') {
+      setCorsHeaders(res);
       const body = await readJsonBody(req);
+
       const sessionId = getSessionId(req);
 
       if (sessionId) {
@@ -154,7 +173,9 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (req.method === 'DELETE') {
+      setCorsHeaders(res);
       const sessionId = getSessionId(req);
+
       const session = sessionId ? sessions.get(sessionId) : undefined;
 
       if (!session) {
